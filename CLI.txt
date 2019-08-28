@@ -1,0 +1,15 @@
+RebasingControl.exe  FILE  --action=[ACTION] --table=[TABLE]  <options> [--offset=]
+
+ACTION:
+    list			display rebasing record
+    add			add a rebasing record
+    remove			remove a rebasing record
+    remove-all		remove all record
+
+TABLE:
+    reloc			relocation table
+    import			import table
+    all			all table (default)
+
+OPTIONS:
+    --basing=<RVA|pFile>	treat offset as RVA or pFile
