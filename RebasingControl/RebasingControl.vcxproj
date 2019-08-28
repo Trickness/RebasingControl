@@ -86,12 +86,13 @@
     <ClCompile>
       <PrecompiledHeader>
       </PrecompiledHeader>
-      <WarningLevel>Level2</WarningLevel>
+      <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PreprocessToFile>false</PreprocessToFile>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

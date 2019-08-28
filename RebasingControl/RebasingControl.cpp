@@ -35,13 +35,14 @@ uint32_t* pD_RelocRVA = nullptr;     // pointer Directories Relocation file offs
 uint32_t* pD_RelocSize = nullptr;
 uint32_t* pD_ImportRVA = nullptr;
 uint32_t* pD_ImportSize = nullptr;
+DWORD* pD_ImageSize = nullptr;
 // END ATTENTION
 PIMAGE_SECTION_HEADER reloc_section = nullptr;
 
-size_t pFile_Sections;          // offset to sections (pFile)
-size_t attri_SectionAligment;
-size_t attri_FileAlignment;
-size_t attri_ImageBase;
+uint32_t pFile_Sections;          // offset to sections (pFile)
+uint32_t attri_SectionAligment;
+uint32_t attri_FileAlignment;
+ULONGLONG attri_ImageBase;
 
 std::vector<uint32_t> relocation_table;
 
@@ -141,7 +142,7 @@ void print_usage() {
 }
 
 int main(int argc, char* argv[]){
-    cout << endl;
+    cout<< endl << "RebasingControl version 0.7 \t AUTHOR sternwzhang@outlook.com" << endl << endl;
     if (argc < 3) { print_usage(); exit(0); }
     string a_file(argv[1]);
     string a_action;
@@ -182,18 +183,18 @@ int main(int argc, char* argv[]){
     if (a_table.at(0) == 'r' or a_table.at(0) == 'R')
         a_table = "reloc";
     sscanf_s(a_str_offset.c_str(), "%x", &a_offset);
-    if (a_action != "list" and (a_str_offset.empty() or a_offset == 0)) {
+    if ((_stricmp(a_action.c_str(),"list") != 0 and (_stricmp(a_action.c_str(), "remove-all") != 0)) and (a_str_offset.empty() or a_offset == 0)) {
         FAILED_MSG("Please specify offset!");
         print_usage();
         exit(0);
     }
 
     fstream file;
-    size_t pFile = 0;
+    uint32_t pFile = 0;
     file.open(a_file, ios::in | ios::binary);
     if (!file) ERR_EXIT;
     file.seekg(0, ios::end);
-    size_t file_size = file.tellg();
+    uint32_t file_size = (uint32_t)file.tellg();
     file.seekg(0, ios::beg);
 
     content = (char*)malloc(file_size);
@@ -238,6 +239,7 @@ int main(int argc, char* argv[]){
         attri_SectionAligment = p_header->SectionAlignment;
         attri_FileAlignment = p_header->FileAlignment;
         attri_ImageBase = p_header->ImageBase;
+        pD_ImageSize = &p_header->SizeOfImage;
         pFile += sizeof(IMAGE_OPTIONAL_HEADER32);
         pD_RelocRVA = (uint32_t*)(content + pFile - 11 * sizeof(IMAGE_DATA_DIRECTORY));
         pD_RelocSize = (uint32_t*)(content + pFile - 11 * sizeof(IMAGE_DATA_DIRECTORY) + sizeof(uint32_t));
@@ -254,6 +256,7 @@ int main(int argc, char* argv[]){
         attri_SectionAligment = p_header->SectionAlignment;
         attri_FileAlignment = p_header->FileAlignment;
         attri_ImageBase = p_header->ImageBase;
+        pD_ImageSize = &p_header->SizeOfImage;
         pFile += sizeof(IMAGE_OPTIONAL_HEADER32);
         pD_RelocRVA = (uint32_t*)(content + pFile - 11 * sizeof(IMAGE_DATA_DIRECTORY));
         pD_RelocSize = (uint32_t*)(content + pFile - 11 * sizeof(IMAGE_DATA_DIRECTORY) + sizeof(uint32_t));
@@ -274,29 +277,30 @@ int main(int argc, char* argv[]){
         pFile += sizeof(IMAGE_SECTION_HEADER);
     }
     if (_strnicmp((const char*)reloc_section->Name, ".reloc", IMAGE_SIZEOF_SHORT_NAME) != 0) {
-        FAILED_MSG("Relocation Section not found!");
-        exit(0);
+        WARNING_MSG("Relocation Section not found!");
     }
+    else {
+        pFile = reloc_section->PointerToRawData;
 
-    pFile = reloc_section->PointerToRawData;
- 
-    
 
-    for (size_t offset = 0; offset < *pD_RelocSize; ) {
-        uint32_t RVA_of_block;
-        uint32_t size_of_block;
-        memcpy((void*)& RVA_of_block, content + pFile + offset, sizeof(uint32_t));
-        memcpy((void*)& size_of_block, content + pFile + offset + sizeof(uint32_t), sizeof(uint32_t));
-        for (size_t i = 2 * sizeof(uint32_t); i < size_of_block; i += sizeof(uint16_t)) {
-            uint16_t item;
-            memcpy((void*)& item, content + pFile + offset + i, sizeof(uint16_t));
-            uint16_t type = item & 1111000000000000;
-            if (type == 0)   continue;  // skip empty record
-            relocation_table.push_back(RVA_of_block + (item & uint16_t(4095)));
+
+        for (size_t offset = 0; offset < *pD_RelocSize; ) {
+            uint32_t RVA_of_block;
+            uint32_t size_of_block;
+            memcpy((void*)& RVA_of_block, content + pFile + offset, sizeof(uint32_t));
+            memcpy((void*)& size_of_block, content + pFile + offset + sizeof(uint32_t), sizeof(uint32_t));
+            for (size_t i = 2 * sizeof(uint32_t); i < size_of_block; i += sizeof(uint16_t)) {
+                uint16_t item;
+                memcpy((void*)& item, content + pFile + offset + i, sizeof(uint16_t));
+                uint16_t type = item & 1111000000000000;
+                if (type == 0)   continue;  // skip empty record
+                relocation_table.push_back(RVA_of_block + (item & uint16_t(4095)));
+            }
+            offset += size_of_block;
         }
-        offset += size_of_block;
     }
 
+    
     uint32_t pImportFile = get_pFile_from_RVA(*pD_ImportRVA);
     if (pImportFile == 0) {
         FAILED_MSG("No import table");
@@ -311,11 +315,10 @@ int main(int argc, char* argv[]){
         pImportFile += sizeof(IMAGE_IMPORT_DESCRIPTOR);
     }
 
-
     uint32_t target_RVA = 0;
     uint32_t target_pFile = 0;
     if (_stricmp(a_basing.c_str(), "ImageBase+RVA") == 0 || _stricmp(a_basing.c_str(), "RVA+ImageBase") == 0) {
-        target_RVA =  a_offset - attri_ImageBase;
+        target_RVA =  a_offset - (attri_ImageBase & 0x0000000011111111);
     }
     else if (_stricmp(a_basing.c_str(), "pFile") == 0) {
         target_RVA = get_RVA_from_pFile(a_offset);
@@ -362,6 +365,57 @@ int main(int argc, char* argv[]){
         }
     }
     else if (_stricmp(a_action.c_str(), "remove-all") == 0) {
+        if (_stricmp(a_table.c_str(), "import") == 0) {
+            FAILED_MSG("You can't delete import section!");
+            goto NORMAL_EXIT;
+        }
+        if (reloc_section == nullptr) {
+            FAILED_MSG("No reloction section!");
+            goto NORMAL_EXIT;
+        }
+
+        // delete .reloc section
+        char* pointer_to_raw_data = content + reloc_section->PointerToRawData;
+        char* pointer_to_raw_data_end = content + reloc_section->PointerToRawData + reloc_section->SizeOfRawData;
+        while (pointer_to_raw_data_end < content + file_size) {
+            *pointer_to_raw_data = *pointer_to_raw_data_end;
+            pointer_to_raw_data++;
+            pointer_to_raw_data_end++;
+        }
+
+        // decrease number of section
+        p_file_header->NumberOfSections--;
+        //*pD_RelocRVA = 0;
+        //*pD_RelocSize = 0;
+
+        // recalculate file size
+        file_size -= reloc_section->SizeOfRawData;
+        
+        *pD_ImageSize = *pD_ImageSize - (reloc_section->SizeOfRawData / attri_SectionAligment) * attri_SectionAligment;
+        if (reloc_section->SizeOfRawData % attri_SectionAligment != 0)
+            * pD_ImageSize = *pD_ImageSize - attri_SectionAligment;
+
+        // clear IMAGE SECTION HEADER
+        char* p_SectionEnd = ((char*)reloc_section) + sizeof(IMAGE_SECTION_HEADER);
+        while (*p_SectionEnd != 0) p_SectionEnd += sizeof(IMAGE_SECTION_HEADER);
+        char* p_SectionStart = ((char*)reloc_section) + sizeof(IMAGE_SECTION_HEADER);
+        char* p_RelocSection = (char*)reloc_section;
+        while (p_SectionEnd != p_SectionStart) {
+            *p_RelocSection = *p_SectionStart;
+            p_SectionStart++;
+            p_RelocSection++;
+        }
+        for (int i = 0; i < sizeof(IMAGE_SECTION_HEADER); ++i)
+            p_RelocSection[i] = 0;
+
+        // write back to file
+        MoveFileA(a_file.c_str(), (a_file+"_backup").c_str());
+
+        file.open((a_file+"_no_reloc").c_str(), ios::out | ios::binary);
+        if(!file) ERR_EXIT
+        file.write(content, file_size);
+        file.flush();
+        file.close();
 
     }
     else if (_stricmp(a_action.c_str(), "add") == 0) {
